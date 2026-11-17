@@ -1,0 +1,29 @@
+#!/bin/sh
+APP="/Applications/Outline.app"
+BIN="$APP/Contents/MacOS/Outline"
+
+if [ ! -x "$BIN" ]; then
+  echo "outline: $APP is not installed" >&2
+  exit 1
+fi
+
+if [ $# -eq 0 ]; then
+  open -a "$APP"
+  exit 0
+fi
+
+target=$1
+if [ -d "$target" ]; then
+  abs=$(cd "$target" && pwd -P)
+elif [ -e "$target" ]; then
+  abs="$(cd "$(dirname "$target")" && pwd -P)/$(basename "$target")"
+else
+  echo "outline: $target: No such file or directory" >&2
+  exit 1
+fi
+
+if pgrep -xq Outline; then
+  "$BIN" "$abs" >/dev/null 2>&1 &
+else
+  open -a "$APP" --args "$abs"
+fi
