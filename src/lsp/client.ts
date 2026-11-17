@@ -106,7 +106,10 @@ function clearProblems(path?: string) {
 class TauriTransport implements Transport {
   private handlers = new Set<(value: string) => void>();
   onRegister: (methods: string[]) => void = () => {};
-  constructor(private id: number) {}
+  constructor(
+    private id: number,
+    private root: string,
+  ) {}
   send(message: string) {
     invoke("lsp_send", { id: this.id, message }).catch(() => {});
   }
@@ -138,6 +141,9 @@ class TauriTransport implements Transport {
           .catch(() => this.reply(id, { applied: false }));
         return true;
       }
+      case "workspace/workspaceFolders":
+        this.reply(value.id, [{ uri: pathToUri(this.root), name: this.root.slice(this.root.lastIndexOf("/") + 1) || this.root }]);
+        return true;
       case "workspace/configuration":
         this.reply(value.id, (value.params?.items ?? []).map(() => null));
         return true;
@@ -347,7 +353,7 @@ function start(server: ServerId, root: string): Entry | null {
   if (unavailable.has(key)) return null;
 
   const id = nextId++;
-  const transport = new TauriTransport(id);
+  const transport = new TauriTransport(id, root);
   const client = new LSPClient({
     rootUri: pathToUri(root),
     timeout: 10000,
@@ -355,6 +361,7 @@ function start(server: ServerId, root: string): Entry | null {
     extensions: [
       {
         clientCapabilities: {
+          workspace: { configuration: true, workspaceFolders: true },
           textDocument: {
             diagnostic: { dynamicRegistration: true, relatedDocumentSupport: false },
             publishDiagnostics: { relatedInformation: false },
