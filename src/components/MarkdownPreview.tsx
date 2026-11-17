@@ -1,14 +1,12 @@
 import { useEffect, useRef } from "react";
 import { Marked } from "marked";
 import DOMPurify from "dompurify";
-import { highlightCode } from "@lezer/highlight";
 import { invoke } from "@tauri-apps/api/core";
 import { X } from "lucide-react";
 import { session } from "../editor/session";
 import { dirname, fs, join } from "../lib/fs";
-import { describeFence } from "../lib/languages";
 import { imageMime } from "../lib/media";
-import { highlight } from "../editor/theme";
+import { highlightBlocks } from "../lib/highlight";
 import { openFile, toggleMarkdownPreview } from "../actions";
 
 const md = new Marked({ gfm: true, breaks: false });
@@ -26,36 +24,6 @@ function resolve(base: string, href: string) {
 }
 
 const isExternal = (href: string) => /^[a-z][a-z0-9+.-]*:/i.test(href);
-
-async function highlightBlocks(root: HTMLElement, alive: () => boolean) {
-  const blocks = root.querySelectorAll<HTMLElement>("pre code[class*='language-']");
-  for (const code of blocks) {
-    const lang = /language-([\w+#-]+)/.exec(code.className)?.[1];
-    const desc = lang ? describeFence(lang) : null;
-    if (!desc) continue;
-    const support = await desc.load().catch(() => null);
-    if (!support || !alive()) return;
-    const text = code.textContent ?? "";
-    const tree = support.language.parser.parse(text);
-    const frag = document.createDocumentFragment();
-    highlightCode(
-      text,
-      tree,
-      highlight,
-      (chunk, classes) => {
-        if (!classes) frag.appendChild(document.createTextNode(chunk));
-        else {
-          const span = document.createElement("span");
-          span.className = classes;
-          span.textContent = chunk;
-          frag.appendChild(span);
-        }
-      },
-      () => frag.appendChild(document.createTextNode("\n")),
-    );
-    code.replaceChildren(frag);
-  }
-}
 
 async function loadImages(root: HTMLElement, base: string, urls: string[], alive: () => boolean) {
   for (const img of root.querySelectorAll<HTMLImageElement>("img[data-src]")) {

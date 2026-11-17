@@ -76,10 +76,10 @@ export async function toggleDir(path: string) {
   if (expanded[path]) {
     const next = { ...expanded };
     delete next[path];
-    set({ expanded: next, selected: path });
+    set({ expanded: next, selected: path, selection: [path], selectionAnchor: null });
     return;
   }
-  set({ expanded: { ...expanded, [path]: true }, selected: path });
+  set({ expanded: { ...expanded, [path]: true }, selected: path, selection: [path], selectionAnchor: null });
   if (!tree[path]) await loadDir(path);
 }
 
@@ -192,6 +192,7 @@ export async function setRoot(path: string, restore?: { tabs: string[]; active: 
     tabs: [],
     active: null,
     selected: null,
+    selection: [],
     recents,
     expanded: keepExpanded,
     history: { stack: [], index: -1 },
@@ -266,7 +267,7 @@ export function activate(path: string | null, fromHistory = false) {
     }
     const real = path ? parseDiffPath(path)?.path ?? path : null;
     const split = s.split ? { ...s.split, [pane === 1 ? "right" : "left"]: path } : null;
-    return { active: path, selected: real ?? s.selected, history, split };
+    return { active: path, selected: real ?? s.selected, selection: real ? [] : s.selection, history, split };
   });
   showIn(pane, path);
 }
@@ -403,6 +404,7 @@ export async function closeFolder() {
     tabs: [],
     active: null,
     selected: null,
+    selection: [],
     split: null,
     problems: {},
     git: emptyGit,
@@ -770,29 +772,94 @@ export function renameEntry(path: string) {
   });
 }
 
+export function visibleTreeOrder(): string[] {
+  const { root, tree, expanded } = get();
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of tree[dir] ?? []) {
+      out.push(e.path);
+      if (e.is_dir && expanded[e.path]) walk(e.path);
+    }
+  };
+  if (root) walk(root);
+  return out;
+}
+
+export function selectInTree(path: string, mode: "single" | "range" | "toggle") {
+  const s = get();
+  if (mode === "single") {
+    set({ selected: path, selection: [path] });
+    return;
+  }
+  if (mode === "toggle") {
+    const base = s.selection.length ? s.selection : s.selected ? [s.selected] : [];
+    const selection = base.includes(path) ? base.filter((p) => p !== path) : [...base, path];
+    set({ selected: path, selection });
+    return;
+  }
+  const order = visibleTreeOrder();
+  const anchor = s.selectionAnchor ?? s.selected;
+  const a = anchor ? order.indexOf(anchor) : -1;
+  const b = order.indexOf(path);
+  if (a < 0 || b < 0) {
+    set({ selected: path, selection: [path] });
+    return;
+  }
+  const [from, to] = a < b ? [a, b] : [b, a];
+  set({ selection: order.slice(from, to + 1), selectionAnchor: anchor });
+}
+
+export function treeSelection(): string[] {
+  const { selection, selected } = get();
+  if (selection.length) return selection;
+  return selected ? [selected] : [];
+}
+
+export function deleteSelected() {
+  const paths = treeSelection();
+  if (paths.length) deleteEntries(paths);
+}
+
 export function deleteEntry(path: string) {
+  const selection = treeSelection();
+  deleteEntries(selection.length > 1 && selection.includes(path) ? selection : [path]);
+}
+
+export function deleteEntries(input: string[]) {
+  const { root } = get();
+  const unique = [...new Set(input)].filter((p) => p !== root);
+  const paths = unique.filter((p) => !unique.some((o) => o !== p && p.startsWith(o + "/")));
+  if (!paths.length) return;
+  const title = paths.length === 1 ? `Move ${basename(paths[0])} to Trash?` : `Move ${paths.length} items to Trash?`;
+  const preview = paths.length > 1 ? paths.slice(0, 6).map(basename).join(", ") + (paths.length > 6 ? `, and ${paths.length - 6} more` : "") : null;
   set({
     dialog: {
       kind: "confirm",
-      title: `Move ${basename(path)} to Trash?`,
-      message: "You can restore it from the macOS Trash.",
+      title,
+      message: preview ? `${preview}. You can restore them from the macOS Trash.` : "You can restore it from the macOS Trash.",
       buttons: [
         { label: "Cancel", kind: "plain", run: () => {} },
         {
           label: "Move to Trash",
           kind: "danger",
           run: async () => {
-            try {
-              await fs.remove(path);
-              const affected = get().tabs.filter((t) => t.path === path || t.path.startsWith(path + "/"));
-              for (const t of affected) {
-                setDirty(t.path, false);
-                await closeTab(t.path);
+            const dirs = new Set<string>();
+            for (const path of paths) {
+              try {
+                await fs.remove(path);
+                dirs.add(dirname(path));
+                const affected = get().tabs.filter((t) => t.path === path || t.path.startsWith(path + "/"));
+                for (const t of affected) {
+                  setDirty(t.path, false);
+                  await closeTab(t.path);
+                }
+              } catch (e) {
+                toast(errorText(e));
               }
-              await loadDir(dirname(path));
-            } catch (e) {
-              toast(errorText(e));
             }
+            set({ selection: [], selectionAnchor: null, selected: null });
+            await Promise.all([...dirs].map(loadDir));
+            requestAnimationFrame(() => document.querySelector<HTMLElement>(".tree")?.focus());
           },
         },
       ],

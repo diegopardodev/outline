@@ -78,10 +78,12 @@ export function Sidebar() {
           </div>
           <div
             className="tree"
+            tabIndex={0}
             onContextMenu={(e) => {
               e.preventDefault();
               set({
                 selected: null,
+                selection: [],
                 menu: {
                   x: e.clientX,
                   y: e.clientY,

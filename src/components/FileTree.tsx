@@ -2,12 +2,28 @@ import { memo, type MouseEvent } from "react";
 import { ChevronRight } from "lucide-react";
 import { useStore, set } from "../store";
 import { fs, type Entry } from "../lib/fs";
-import { copyPath, deleteEntry, newFile, newFolder, openDiff, openFile, openToSide, renameEntry, toggleDir } from "../actions";
+import { copyPath, deleteEntries, deleteEntry, newFile, newFolder, openDiff, openFile, openToSide, renameEntry, selectInTree, toggleDir, treeSelection } from "../actions";
 import { FileIcon, FolderIcon } from "./FileIcon";
+import { session } from "../editor/session";
 
 function openMenu(e: MouseEvent, entry: Entry) {
   e.preventDefault();
   e.stopPropagation();
+  const current = treeSelection();
+  if (current.length > 1 && current.includes(entry.path)) {
+    set({
+      menu: {
+        x: e.clientX,
+        y: e.clientY,
+        items: [
+          { label: `Copy ${current.length} Paths`, run: () => navigator.clipboard.writeText(current.join("\n")) },
+          "separator",
+          { label: `Move ${current.length} Items to Trash`, shortcut: "⌘⌫", danger: true, run: () => deleteEntries(current) },
+        ],
+      },
+    });
+    return;
+  }
   const change = useStore.getState().git.changes[entry.path];
   const fileItems = entry.is_dir
     ? []
@@ -18,6 +34,8 @@ function openMenu(e: MouseEvent, entry: Entry) {
       ];
   set({
     selected: entry.path,
+    selection: [entry.path],
+    selectionAnchor: null,
     menu: {
       x: e.clientX,
       y: e.clientY,
@@ -31,7 +49,7 @@ function openMenu(e: MouseEvent, entry: Entry) {
         { label: "Copy Relative Path", run: () => copyPath(entry.path, true) },
         { label: "Reveal in Finder", run: () => fs.reveal(entry.path) },
         "separator",
-        { label: "Move to Trash", danger: true, run: () => deleteEntry(entry.path) },
+        { label: "Move to Trash", shortcut: "⌘⌫", danger: true, run: () => deleteEntry(entry.path) },
       ],
     },
   });
@@ -39,7 +57,7 @@ function openMenu(e: MouseEvent, entry: Entry) {
 
 const Row = memo(function Row({ entry, depth }: { entry: Entry; depth: number }) {
   const open = useStore((s) => !!s.expanded[entry.path]);
-  const selected = useStore((s) => s.selected === entry.path);
+  const selected = useStore((s) => (s.selection.length ? s.selection.includes(entry.path) : s.selected === entry.path));
   const active = useStore((s) => s.active === entry.path);
   const dirty = useStore((s) => s.tabs.some((t) => t.path === entry.path && t.dirty));
   const git = useStore((s) => (entry.is_dir ? (s.git.dirs[entry.path] ? "dir" : s.git.changes[entry.path]) : s.git.changes[entry.path]));
@@ -49,7 +67,21 @@ const Row = memo(function Row({ entry, depth }: { entry: Entry; depth: number })
       <div
         className={`tree-row${selected ? " selected" : ""}${active ? " active" : ""}${git && git !== "dir" ? ` git-${git}` : ""}`}
         style={{ paddingLeft: 8 + depth * 16 }}
-        onClick={() => (entry.is_dir ? toggleDir(entry.path) : (set({ selected: entry.path }), openFile(entry.path)))}
+        onMouseDown={(e) => {
+          if (e.shiftKey) e.preventDefault();
+          e.currentTarget.closest<HTMLElement>(".tree")?.focus();
+        }}
+        onClick={(e) => {
+          if (e.shiftKey) return selectInTree(entry.path, "range");
+          if (e.metaKey) return selectInTree(entry.path, "toggle");
+          if (entry.is_dir) return toggleDir(entry.path);
+          selectInTree(entry.path, "single");
+          const tree = e.currentTarget.closest<HTMLElement>(".tree");
+          openFile(entry.path).then(() => requestAnimationFrame(() => tree?.focus()));
+        }}
+        onDoubleClick={() => {
+          if (!entry.is_dir) requestAnimationFrame(() => session.focus());
+        }}
         onContextMenu={(e) => openMenu(e, entry)}
         title={entry.path}
       >

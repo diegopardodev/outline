@@ -108,6 +108,33 @@ fn find_typescript(app: &AppHandle, root: &Path) -> Option<PathBuf> {
     native_tsc(&bundled)
 }
 
+fn uses_tailwind(root: &Path) -> bool {
+    let mut dir = Some(root);
+    while let Some(d) = dir {
+        let nm = d.join("node_modules");
+        if nm.join("tailwindcss/package.json").is_file() || nm.join("@tailwindcss/postcss/package.json").is_file() {
+            return true;
+        }
+        dir = d.parent();
+    }
+    false
+}
+
+fn find_tailwind(app: &AppHandle, root: &Path) -> Option<PathBuf> {
+    if !uses_tailwind(root) || which("node").is_none() {
+        return None;
+    }
+    let bin = app
+        .path()
+        .app_data_dir()
+        .ok()?
+        .join("servers/node_modules/.bin/tailwindcss-language-server");
+    if bin.is_file() {
+        return Some(bin);
+    }
+    which("tailwindcss-language-server")
+}
+
 fn first_available(options: &[(&str, &[&str])]) -> Option<(PathBuf, Vec<String>)> {
     options.iter().find_map(|(name, args)| {
         which(name).map(|p| (p, args.iter().map(|s| s.to_string()).collect()))
@@ -117,6 +144,7 @@ fn first_available(options: &[(&str, &[&str])]) -> Option<(PathBuf, Vec<String>)
 fn resolve(app: &AppHandle, server: &str, root: &Path) -> Option<(PathBuf, Vec<String>)> {
     match server {
         "typescript" => find_typescript(app, root).map(|p| (p, vec!["--lsp".into(), "--stdio".into()])),
+        "tailwind" => find_tailwind(app, root).map(|p| (p, vec!["--stdio".into()])),
         "rust" => which("rust-analyzer").filter(|p| works(p, &["--version"])).map(|p| (p, vec![])),
         "swift" => first_available(&[("sourcekit-lsp", &[])]),
         "c" => first_available(&[("clangd", &[])]),

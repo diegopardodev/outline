@@ -93,6 +93,8 @@ export type State = {
   tree: Record<string, Entry[]>;
   expanded: Record<string, true>;
   selected: string | null;
+  selection: string[];
+  selectionAnchor: string | null;
   tabs: Tab[];
   active: string | null;
   sidebarVisible: boolean;
@@ -137,6 +139,8 @@ export const useStore = create<State>(() => ({
   tree: {},
   expanded: Object.fromEntries(p.expanded.map((k) => [k, true as const])),
   selected: null,
+  selection: [],
+  selectionAnchor: null,
   tabs: [],
   active: null,
   sidebarVisible: p.sidebarVisible,

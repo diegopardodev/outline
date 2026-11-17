@@ -275,6 +275,7 @@ kbd {
   flex: 1;
   overflow: auto;
   padding: 0 0 16px;
+  outline: none;
 }
 
 .tree-row {
@@ -293,6 +294,9 @@ kbd {
 }
 .tree-row.selected {
   background: rgba(0, 0, 0, 0.055);
+}
+.tree:focus .tree-row.selected {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 .tree-row.active {
   background: rgba(0, 0, 0, 0.08);
@@ -2337,6 +2341,9 @@ button.status-item:hover {
 }
 :root[data-theme="dark"] .tree-row.selected {
   background: rgba(255, 255, 255, 0.07);
+}
+:root[data-theme="dark"] .tree:focus .tree-row.selected {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 :root[data-theme="dark"] .tree-row.active {
   background: rgba(255, 255, 255, 0.1);

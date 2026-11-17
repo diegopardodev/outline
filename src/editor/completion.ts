@@ -13,7 +13,8 @@ import {
 } from "@codemirror/autocomplete";
 import { Prec, type Extension, type Text } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { LSPPlugin } from "@codemirror/lsp-client";
+import { LSPPlugin, type LSPClient } from "@codemirror/lsp-client";
+import { renderMarkdownDoc, tailwindConnection } from "../lsp/client";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
@@ -32,6 +33,7 @@ type Item = {
   textEdit?: { newText: string; range?: Range; insert?: Range; replace?: Range };
   textEditText?: string;
   additionalTextEdits?: TextEdit[];
+  command?: { command: string };
 };
 type ItemList = {
   isIncomplete?: boolean;
@@ -109,7 +111,20 @@ function appendAdditionalEdits(view: EditorView, edits: TextEdit[] | undefined, 
   if (changes.length) view.dispatch({ changes, userEvent: "input.complete" });
 }
 
-function renderInfo(plugin: LSPPlugin, item: Item): Node | null {
+type Connection = {
+  client: LSPClient;
+  uri: string;
+  sync: () => void;
+  toHTML: ((doc: string | MarkupContent) => string) | null;
+  tailwind?: boolean;
+};
+
+type ColorCompletion = Completion & { swatch?: string };
+
+const classBefore = /[^\s"'`{}()<>=,;]+$/;
+const classOnly = /^[^\s"'`{}()<>=,;]*$/;
+
+function renderInfo(conn: Connection, item: Item): Node | null {
   if (!item.detail && !item.documentation) return null;
   const root = document.createElement("div");
   root.className = "outline-completion-info";
@@ -121,32 +136,55 @@ function renderInfo(plugin: LSPPlugin, item: Item): Node | null {
   }
   if (item.documentation) {
     const body = document.createElement("div");
-    body.className = "cm-lsp-documentation outline-completion-info-doc";
-    body.innerHTML = plugin.docToHTML(item.documentation);
+    if (conn.toHTML) {
+      body.className = "cm-lsp-documentation outline-completion-info-doc";
+      body.innerHTML = conn.toHTML(item.documentation);
+    } else {
+      body.className = "outline-completion-info-doc";
+      const doc = item.documentation;
+      body.appendChild(renderMarkdownDoc(typeof doc === "string" ? doc.replace(/[\\`*_[\]<>]/g, "\\$&") : doc.value));
+    }
     root.appendChild(body);
   }
   return root;
 }
 
-export const lspCompletionSource: CompletionSource = async (ctx: CompletionContext) => {
+export const lspCompletionSource: CompletionSource = (ctx: CompletionContext) => {
   const plugin = ctx.view && LSPPlugin.get(ctx.view);
   if (!plugin) return null;
-  const provider = plugin.client.serverCapabilities?.completionProvider;
+  return completeFromServer(ctx, {
+    client: plugin.client,
+    uri: plugin.uri,
+    sync: () => plugin.client.sync(),
+    toHTML: (doc) => plugin.docToHTML(doc),
+  });
+};
+
+export const tailwindCompletionSource: CompletionSource = (ctx: CompletionContext) => {
+  const view = ctx.view;
+  const tw = view && view.state.facet(tailwindConnection);
+  if (!view || !tw || !tw.client.connected) return null;
+  return completeFromServer(ctx, { client: tw.client, uri: tw.uri, sync: () => tw.sync(view), toHTML: null, tailwind: true });
+};
+
+async function completeFromServer(ctx: CompletionContext, conn: Connection): Promise<CompletionResult | null> {
+  const provider = conn.client.serverCapabilities?.completionProvider;
   if (!provider) return null;
   const ch = ctx.state.sliceDoc(ctx.pos - 1, ctx.pos);
-  const word = ctx.matchBefore(wordBefore);
+  const word = ctx.matchBefore(conn.tailwind ? classBefore : wordBefore);
   let context: { triggerKind: number; triggerCharacter?: string };
   if (ctx.explicit) context = { triggerKind: 1 };
-  else if (provider.triggerCharacters?.includes(ch) && ch !== " ") context = { triggerKind: 2, triggerCharacter: ch };
-  else if (word && /[\p{L}_$]/u.test(word.text[0])) context = { triggerKind: 1 };
+  else if (provider.triggerCharacters?.includes(ch) && (ch !== " " || conn.tailwind)) context = { triggerKind: 2, triggerCharacter: ch };
+  else if (word && (conn.tailwind || /[\p{L}_$]/u.test(word.text[0]))) context = { triggerKind: 1 };
   else return null;
 
-  plugin.client.sync();
-  const params = { textDocument: { uri: plugin.uri }, position: plugin.toPosition(ctx.pos, ctx.state.doc), context };
-  ctx.addEventListener("abort", () => plugin.client.cancelRequest(params));
+  conn.sync();
+  const line = ctx.state.doc.lineAt(ctx.pos);
+  const params = { textDocument: { uri: conn.uri }, position: { line: line.number - 1, character: ctx.pos - line.from }, context };
+  ctx.addEventListener("abort", () => conn.client.cancelRequest(params));
   let raw: Item[] | ItemList | null;
   try {
-    raw = await plugin.client.request<typeof params, Item[] | ItemList | null>("textDocument/completion", params);
+    raw = await conn.client.request<typeof params, Item[] | ItemList | null>("textDocument/completion", params);
   } catch {
     return null;
   }
@@ -176,32 +214,35 @@ export const lspCompletionSource: CompletionSource = async (ctx: CompletionConte
     if (!resolveSupported || (item.documentation && item.additionalTextEdits)) return Promise.resolve(item);
     let p = resolved.get(item);
     if (!p) {
-      p = plugin.client.request<Item, Item>("completionItem/resolve", item).catch(() => item);
+      p = conn.client.request<Item, Item>("completionItem/resolve", item).catch(() => item);
       resolved.set(item, p);
     }
     return p;
   };
   const done = new Map<Item, Item>();
 
-  const options: Completion[] = list.items.map((item) => {
+  const options: ColorCompletion[] = list.items.map((item) => {
     const text = item.textEdit?.newText ?? item.textEditText ?? item.insertText ?? item.label;
     const isSnippet = (item.insertTextFormat ?? list.itemDefaults?.insertTextFormat) === 2;
     const label = item.filterText ?? item.label;
     const display = item.label + (item.labelDetails?.detail ?? "");
-    const option: Completion = {
+    const swatch = item.kind === 16 && typeof item.documentation === "string" ? item.documentation : undefined;
+    const option: ColorCompletion = {
       label,
+      swatch,
       displayLabel: display === label ? undefined : display,
-      detail: item.labelDetails?.description,
-      type: kinds[item.kind ?? 1] ?? "text",
+      detail: item.labelDetails?.description ?? (conn.tailwind && !swatch ? item.detail : undefined),
+      type: swatch ? "tw-color" : (kinds[item.kind ?? 1] ?? "text"),
       boost: -Math.round((99 * (rank.get(item.sortText ?? item.label) ?? 0)) / spread),
       info: () =>
         resolve(item).then((full) => {
           done.set(item, full);
-          return renderInfo(plugin, full);
+          return renderInfo(conn, full);
         }),
       apply: (view, completion, start, end) => {
         if (isSnippet) snippet(lspToSnippet(text))(view, completion, start, end);
         else view.dispatch({ ...insertCompletionText(view.state, text, start, end), annotations: pickedCompletion.of(completion) });
+        if (item.command?.command === "editor.action.triggerSuggest") setTimeout(() => startCompletion(view), 0);
         const line = view.state.doc.lineAt(view.state.selection.main.head);
         const known = done.get(item) ?? (item.additionalTextEdits ? item : null);
         if (known) appendAdditionalEdits(view, known.additionalTextEdits, line.from);
@@ -220,11 +261,11 @@ export const lspCompletionSource: CompletionSource = async (ctx: CompletionConte
   return {
     from,
     options,
-    validFor: list.isIncomplete ? undefined : validFor(list.items),
+    validFor: list.isIncomplete ? undefined : conn.tailwind ? classOnly : validFor(list.items),
     getMatch: (completion, matched) =>
       matched && completion.displayLabel?.startsWith(completion.label) ? matched : [],
   } satisfies CompletionResult;
-};
+}
 
 const wordCache = new WeakMap<Text, string[]>();
 const scanLimit = 400_000;
@@ -365,6 +406,15 @@ for (const [type, { svg: body, color }] of Object.entries(kindIcons)) {
 }
 
 const completionTheme = EditorView.theme({
+  ".cm-completionIcon-tw-color": { display: "none" },
+  ".outline-completion-swatch": {
+    width: "12px",
+    height: "12px",
+    margin: "0 10px 0 2px",
+    borderRadius: "3px",
+    flexShrink: "0",
+    boxShadow: "inset 0 0 0 1px rgba(0, 0, 0, 0.18)",
+  },
   ".cm-tooltip.cm-tooltip-autocomplete": { padding: "0", overflow: "visible" },
   ".cm-tooltip.cm-tooltip-autocomplete > ul": {
     fontFamily: "var(--font-mono)",
@@ -458,7 +508,19 @@ const completionTheme = EditorView.theme({
 export function completionExtensions(): Extension[] {
   return [
     autocompletion({
-      override: [lspCompletionSource, localCompletionSource],
+      override: [lspCompletionSource, tailwindCompletionSource, localCompletionSource],
+      addToOptions: [
+        {
+          position: 21,
+          render: (completion: ColorCompletion) => {
+            if (!completion.swatch) return null;
+            const el = document.createElement("span");
+            el.className = "outline-completion-swatch";
+            el.style.backgroundColor = completion.swatch;
+            return el;
+          },
+        },
+      ],
       icons: true,
       activateOnTypingDelay: 30,
       maxRenderedOptions: 120,

@@ -27,6 +27,7 @@ import {
   closeTab,
   collapseAll,
   copyPath,
+  deleteSelected,
   cycleTab,
   focusGroup,
   focusGroupStep,
@@ -75,7 +76,7 @@ export type Command = { id: string; label: string; run: () => void; hidden?: boo
 
 // "editorFocus" only fires while the editor itself has focus, for keys that mean
 // something else elsewhere (⌥↑ in the terminal, arrows in the file tree).
-type Context = "editor" | "terminal" | "field" | "other";
+type Context = "editor" | "terminal" | "field" | "explorer" | "other";
 type When = Context | "editorFocus";
 type Binding = { key: string; command: string; when?: When };
 
@@ -203,6 +204,7 @@ export const commands: Command[] = [
   { id: "glass-reset", label: "Reset Transparency", run: () => setGlass(0.74) },
   { id: "collapse-tree", label: "Collapse Folders in Explorer", run: collapseAll },
   { id: "reveal", label: "Reveal in Finder", run: revealActive },
+  { id: "delete-file", label: "Delete Selected Files", run: deleteSelected },
   { id: "copy-path", label: "Copy Path of Active File", run: () => activeFile() && copyPath(activeFile()!) },
   { id: "copy-rel-path", label: "Copy Relative Path of Active File", run: () => activeFile() && copyPath(activeFile()!, true) },
   { id: "git-diff", label: "Git: Open Changes", run: () => activeFile() && openDiff(activeFile()!) },
@@ -291,6 +293,7 @@ export const defaultBindings: Binding[] = [
   { key: "cmd+alt+c", command: "copy-path" },
   { key: "cmd+alt+shift+c", command: "copy-rel-path" },
   { key: "cmd+k r", command: "reveal" },
+  { key: "cmd+backspace", command: "delete-file", when: "explorer" },
   { key: "cmd+shift+s", command: "save-as" },
   { key: "cmd+f", command: "find", when: "editor" },
   { key: "cmd+alt+f", command: "replace", when: "editor" },
@@ -351,6 +354,7 @@ function contextOf(target: HTMLElement | null): Context {
   if (target?.closest?.(".terminal-panel")) return "terminal";
   if (target?.closest?.(".cm-editor")) return target.closest(".cm-panels") ? "field" : "editor";
   if (target?.closest?.("input, textarea")) return "field";
+  if (target?.closest?.(".tree")) return "explorer";
   return "other";
 }
 
