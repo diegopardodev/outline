@@ -56,7 +56,8 @@
       "../scripts/outline": "outline"
     },
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "8B4FC53F354A47DADB6892BE1FF039FBC3D44B72"
     }
   }
 }
