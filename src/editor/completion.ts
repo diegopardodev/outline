@@ -15,6 +15,7 @@ import { Prec, type Extension, type Text } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { LSPPlugin, type LSPClient } from "@codemirror/lsp-client";
 import { renderMarkdownDoc, tailwindConnection } from "../lsp/client";
+import { snippetCompletionSource } from "./snippets";
 
 type Position = { line: number; character: number };
 type Range = { start: Position; end: Position };
@@ -508,7 +509,7 @@ const completionTheme = EditorView.theme({
 export function completionExtensions(): Extension[] {
   return [
     autocompletion({
-      override: [lspCompletionSource, tailwindCompletionSource, localCompletionSource],
+      override: [snippetCompletionSource, lspCompletionSource, tailwindCompletionSource, localCompletionSource],
       addToOptions: [
         {
           position: 21,

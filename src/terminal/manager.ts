@@ -69,6 +69,24 @@ const theme: ITheme = {
   brightWhite: "#a3a3a3",
 };
 
+function editingSequence(e: KeyboardEvent): string | null {
+  if (e.ctrlKey) return null;
+  if (e.metaKey && !e.altKey && !e.shiftKey) {
+    if (e.key === "Backspace") return "\x15";
+    if (e.key === "Delete") return "\x0b";
+    if (e.key === "ArrowLeft") return "\x01";
+    if (e.key === "ArrowRight") return "\x05";
+    return null;
+  }
+  if (e.altKey && !e.metaKey && !e.shiftKey) {
+    if (e.key === "Backspace") return "\x17";
+    if (e.key === "Delete") return "\x1bd";
+    if (e.key === "ArrowLeft") return "\x1bb";
+    if (e.key === "ArrowRight") return "\x1bf";
+  }
+  return null;
+}
+
 export function createTerminal(opts: { title?: string; command?: string } = {}) {
   const id = nextId++;
   const el = document.createElement("div");
@@ -82,9 +100,18 @@ export function createTerminal(opts: { title?: string; command?: string } = {}) 
     cursorWidth: 2,
     allowTransparency: true,
     allowProposedApi: true,
-    macOptionIsMeta: true,
+    macOptionIsMeta: false,
     scrollback: 10000,
     theme: get().dark ? darkTheme : theme,
+  });
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== "keydown") return true;
+    const seq = editingSequence(e);
+    if (seq == null) return true;
+    e.preventDefault();
+    const inst = instances.get(id);
+    if (inst?.running) pty.write(id, seq).catch(() => {});
+    return false;
   });
   const fit = new FitAddon();
   term.loadAddon(fit);

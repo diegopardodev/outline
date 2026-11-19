@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { ArrowDown, ArrowUp, CircleAlert, GitBranch, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, CircleAlert, FileDiff, GitBranch, TriangleAlert } from "lucide-react";
 import { get, set, useStore, type MenuItem } from "../store";
 import { showGit, toggleProblems } from "../actions";
 import { session } from "../editor/session";
@@ -69,6 +69,7 @@ export function StatusBar() {
   const ahead = useStore((s) => s.git.ahead);
   const behind = useStore((s) => s.git.behind);
   const busy = useStore((s) => s.git.busy);
+  const changeCount = useStore((s) => s.git.entries.length);
   const counts = useProblemCounts();
 
   if (!visible) return null;
@@ -91,6 +92,12 @@ export function StatusBar() {
               {ahead}
             </>
           )}
+        </button>
+      )}
+      {branch && changeCount > 0 && (
+        <button className="status-item" title={`${changeCount} pending change${changeCount === 1 ? "" : "s"}`} onClick={showGit}>
+          <FileDiff size={12} strokeWidth={1.9} />
+          {changeCount}
         </button>
       )}
       {busy && <span className="status-item">{busy}…</span>}

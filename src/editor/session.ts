@@ -49,6 +49,7 @@ import { editorHighlight, editorTheme } from "./theme";
 import { completionExtensions, setOtherDocsProvider } from "./completion";
 import { gitDecorations, setGitBase } from "./decorations";
 import { indentGuides, overviewRuler } from "./decorations";
+import { docPath } from "./snippets";
 import { lsp, type TextEdit } from "../lsp/client";
 import { describe } from "../lib/languages";
 import { settings } from "../lib/settings";
@@ -75,6 +76,7 @@ const language = new Compartment();
 const wrapping = new Compartment();
 const indentation = new Compartment();
 const lspSlot = new Compartment();
+const pathSlot = new Compartment();
 const mirrorLanguage = new Compartment();
 const sync = Annotation.define<boolean>();
 
@@ -334,12 +336,12 @@ function sharedExtensions(indent: { unit: string; size: number }): Extension[] {
   ];
 }
 
-function baseExtensions(indent: Indent): Extension[] {
-  return [...sharedExtensions(indent), language.of([]), lspSlot.of([]), focusTracker(0), listener];
+function baseExtensions(indent: Indent, path: string): Extension[] {
+  return [...sharedExtensions(indent), pathSlot.of(docPath.of(path)), language.of([]), lspSlot.of([]), focusTracker(0), listener];
 }
 
-function mirrorExtensions(indent: Indent): Extension[] {
-  return [...sharedExtensions(indent), mirrorLanguage.of([]), focusTracker(1), mirrorListener];
+function mirrorExtensions(indent: Indent, path: string): Extension[] {
+  return [...sharedExtensions(indent), pathSlot.of(docPath.of(path)), mirrorLanguage.of([]), focusTracker(1), mirrorListener];
 }
 
 function currentState(path: string): EditorState | null {
@@ -488,7 +490,7 @@ export const session = {
   open(path: string, content: string) {
     const doc = Text.of(content.split(/\r?\n/));
     const indent = detectIndent(doc);
-    const state = EditorState.create({ doc, extensions: baseExtensions(indent) });
+    const state = EditorState.create({ doc, extensions: baseExtensions(indent, path) });
     const eol = detectEol(content);
     docs.set(path, { state, saved: state.doc, eol, savedEol: eol });
     loadLanguage(path, (support) => applyEffects(path, [language.reconfigure(support)]));
@@ -542,7 +544,7 @@ export const session = {
       EditorState.create({
         doc: source.doc,
         selection: source.selection,
-        extensions: mirrorExtensions(indent),
+        extensions: mirrorExtensions(indent, path),
       }),
     );
     inView2 = path;
@@ -704,6 +706,7 @@ export const session = {
     bases.delete(from);
     if (inView === from) inView = to;
     if (inView2 === from) inView2 = to;
+    applyEffects(to, [pathSlot.reconfigure(docPath.of(to))]);
     loadLanguage(to, (support) => applyEffects(to, [language.reconfigure(support)]));
     attachLanguageServer(to);
   },

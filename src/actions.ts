@@ -732,6 +732,50 @@ export function newFolder(base?: string | null) {
   });
 }
 
+function followMove(path: string, next: string) {
+  const move = (p: string) => (p === path ? next : p.startsWith(path + "/") ? next + p.slice(path.length) : p);
+  const moveKeys = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).map(([k, v]) => [move(k), v]));
+  const before = get().tabs.map((t) => t.path);
+  set((s) => ({
+    tabs: s.tabs.map((t) => (t.path === move(t.path) ? t : { ...t, path: move(t.path), name: t.path === path ? basename(next) : t.name })),
+    active: s.active && move(s.active),
+    split: s.split ? { ...s.split, left: s.split.left && move(s.split.left), right: s.split.right && move(s.split.right) } : null,
+    history: { ...s.history, stack: s.history.stack.map(move) },
+    mdPreview: moveKeys(s.mdPreview),
+    expanded: moveKeys(s.expanded),
+  }));
+  for (const old of before) {
+    const now = move(old);
+    if (now !== old) session.rename(old, now);
+  }
+  fileCache = null;
+}
+
+export async function moveEntries(input: string[], dir: string) {
+  const unique = [...new Set(input)];
+  const paths = unique.filter(
+    (p) => !unique.some((o) => o !== p && p.startsWith(o + "/")) && dirname(p) !== dir && dir !== p && !dir.startsWith(p + "/"),
+  );
+  if (!paths.length) return;
+  const parents = new Set<string>([dir]);
+  const moved: string[] = [];
+  for (const path of paths) {
+    const next = join(dir, basename(path));
+    try {
+      await fs.rename(path, next);
+      followMove(path, next);
+      parents.add(dirname(path));
+      moved.push(next);
+    } catch (e) {
+      toast(`${basename(path)}: ${errorText(e)}`);
+    }
+  }
+  set((s) => ({ expanded: dir === s.root ? s.expanded : { ...s.expanded, [dir]: true }, selection: moved, selected: moved[moved.length - 1] ?? s.selected, selectionAnchor: null }));
+  await Promise.all([...parents].map(loadDir));
+  await Promise.all(Object.keys(get().expanded).filter((p) => moved.some((m) => p === m || p.startsWith(m + "/"))).map(loadDir));
+  refreshGit();
+}
+
 export function renameEntry(path: string) {
   const name = basename(path);
   const dot = name.lastIndexOf(".");
@@ -748,23 +792,8 @@ export function renameEntry(path: string) {
         const next = join(dirname(path), value.trim());
         if (next === path) return;
         await fs.rename(path, next);
-        // Everything that remembers a path (tabs, split panes, history, previews,
-        // expanded folders) has to follow the renamed file or folder.
-        const move = (p: string) => (p === path ? next : p.startsWith(path + "/") ? next + p.slice(path.length) : p);
-        const moveKeys = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).map(([k, v]) => [move(k), v]));
-        set((s) => ({
-          tabs: s.tabs.map((t) => (t.path === move(t.path) ? t : { ...t, path: move(t.path), name: t.path === path ? basename(next) : t.name })),
-          active: s.active && move(s.active),
-          selected: next,
-          split: s.split ? { ...s.split, left: s.split.left && move(s.split.left), right: s.split.right && move(s.split.right) } : null,
-          history: { ...s.history, stack: s.history.stack.map(move) },
-          mdPreview: moveKeys(s.mdPreview),
-          expanded: moveKeys(s.expanded),
-        }));
-        for (const t of get().tabs) {
-          const old = t.path === next ? path : t.path.startsWith(next + "/") ? path + t.path.slice(next.length) : null;
-          if (old) session.rename(old, t.path);
-        }
+        followMove(path, next);
+        set({ selected: next, selection: [next], selectionAnchor: null });
         await loadDir(dirname(path));
         await Promise.all(Object.keys(get().expanded).filter((p) => p === next || p.startsWith(next + "/")).map(loadDir));
       },

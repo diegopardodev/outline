@@ -12,7 +12,6 @@ export function Sidebar() {
   const root = useStore((s) => s.root);
   const width = useStore((s) => s.sidebarWidth);
   const mode = useStore((s) => s.sidebarMode);
-  const changeCount = useStore((s) => s.git.entries.length);
   const isRepo = useStore((s) => !!s.git.top);
   const drag = useRef<{ x: number; w: number } | null>(null);
 
@@ -50,7 +49,7 @@ export function Sidebar() {
         </button>
         {isRepo && (
           <button className={mode === "git" ? "on" : ""} onClick={() => set({ sidebarMode: "git" })}>
-            Changes{changeCount > 0 && <span className="seg-count">{changeCount}</span>}
+            Changes
           </button>
         )}
       </div>
@@ -65,10 +64,10 @@ export function Sidebar() {
               {basename(root)}
             </span>
             <div className="sidebar-actions">
-              <button className="icon-btn" title="New File (⌘N)" onClick={() => newFile(root)}>
+              <button className="icon-btn" title="New File (⌘N)" onClick={() => newFile()}>
                 <FilePlus2 size={14} strokeWidth={1.7} />
               </button>
-              <button className="icon-btn" title="New Folder (⇧⌘N)" onClick={() => newFolder(root)}>
+              <button className="icon-btn" title="New Folder (⇧⌘N)" onClick={() => newFolder()}>
                 <FolderPlus size={14} strokeWidth={1.7} />
               </button>
               <button className="icon-btn" title="Collapse Folders" onClick={collapseAll}>
